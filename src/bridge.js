@@ -159,7 +159,8 @@ async function broadcastEmbed(config, channelType, embed, options = {}) {
         }
         
         if (options.components) {
-          payload.components = options.components;
+          // Serialize components to JSON for webhook compatibility
+          payload.components = options.components.map(c => c.toJSON ? c.toJSON() : c);
         }
         
         const sent = await webhook.send(payload);

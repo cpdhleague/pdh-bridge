@@ -163,7 +163,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isButton()) {
       // LFG game type selection: "lfg_type_league" or "lfg_type_casual"
       if (interaction.customId.startsWith('lfg_type_')) {
-        await handleTypeSelection(interaction);
+        await handleTypeSelection(interaction, bridgeConfig);
         return;
       }
       

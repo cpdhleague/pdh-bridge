@@ -167,12 +167,44 @@ function createLfgPost(creatorId, creatorName, gameType, notes, maxPlayers, expi
 }
 
 function addLfgPlayer(postId, userId, username) {
+  // CRITICAL: Check the cap BEFORE inserting.
+  // Without this check, multiple people clicking "Join" simultaneously
+  // can all get inserted, exceeding the player limit.
+  //
+  // LEARNING NOTE ON RACE CONDITIONS:
+  // Even with this check, there's a tiny window where two players
+  // could both read "3 players" and both try to insert as player #4.
+  // SQLite's write lock prevents true simultaneous writes, but we
+  // add a post-insert recount as a safety net. If we detect we've
+  // gone over the cap, we roll back the insert.
+
   try {
-    db.prepare(`INSERT INTO lfg_players (lfg_post_id, user_id, username) VALUES (?, ?, ?)`).run(postId, userId, username);
-    const count = db.prepare('SELECT COUNT(*) as cnt FROM lfg_players WHERE lfg_post_id = ?').get(postId).cnt;
-    db.prepare('UPDATE lfg_posts SET current_players = ? WHERE id = ?').run(count, postId);
     const post = getLfgPost(postId);
-    return { success: true, currentPlayers: count, maxPlayers: post?.max_players || 4 };
+    if (!post) return { success: false, reason: 'post_not_found' };
+
+    // PRE-CHECK: Is the lobby already full?
+    const currentCount = db.prepare('SELECT COUNT(*) as cnt FROM lfg_players WHERE lfg_post_id = ?').get(postId).cnt;
+    if (currentCount >= post.max_players) {
+      return { success: false, reason: 'lobby_full' };
+    }
+
+    // Attempt the insert (UNIQUE constraint prevents duplicate joins)
+    db.prepare(`INSERT INTO lfg_players (lfg_post_id, user_id, username) VALUES (?, ?, ?)`).run(postId, userId, username);
+
+    // POST-CHECK: Recount to catch any race condition
+    const newCount = db.prepare('SELECT COUNT(*) as cnt FROM lfg_players WHERE lfg_post_id = ?').get(postId).cnt;
+
+    if (newCount > post.max_players) {
+      // We went over — roll back this player's join
+      db.prepare('DELETE FROM lfg_players WHERE lfg_post_id = ? AND user_id = ?').run(postId, userId);
+      const correctedCount = db.prepare('SELECT COUNT(*) as cnt FROM lfg_players WHERE lfg_post_id = ?').get(postId).cnt;
+      db.prepare('UPDATE lfg_posts SET current_players = ? WHERE id = ?').run(correctedCount, postId);
+      return { success: false, reason: 'lobby_full' };
+    }
+
+    // Update the cached count on the post
+    db.prepare('UPDATE lfg_posts SET current_players = ? WHERE id = ?').run(newCount, postId);
+    return { success: true, currentPlayers: newCount, maxPlayers: post.max_players };
   } catch (err) {
     if (err.message.includes('UNIQUE')) {
       return { success: false, reason: 'already_joined' };
