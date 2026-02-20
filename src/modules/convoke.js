@@ -40,8 +40,8 @@
 // This is a very common pattern in web development.
 // =============================================================
 
-const CONVOKE_API_BASE = 'https://api.convoke.gg';
-const CONVOKE_CREATE_GAME_ENDPOINT = `${CONVOKE_API_BASE}/game/create-game`;
+const CONVOKE_API_BASE = 'https://api.convoke.games';
+const CONVOKE_CREATE_GAME_ENDPOINT = `${CONVOKE_API_BASE}/api/game/create-game`;
 
 // =============================================================
 // CREATE A CONVOKE ROOM

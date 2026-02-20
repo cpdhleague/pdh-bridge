@@ -397,8 +397,9 @@ async function sendConvokeDMs(client, post, players, postId) {
   // For LEAGUE games, add a reminder to log the game on cpdh.guide
   if (isLeague) {
     dmMessage +=
-      `\n🏆 **Wanderer's League Reminder:**\n` +
-      `Don't forget to log your game results at **[cPDH Guide](https://app.cpdh.guide)**!\n`;
+      `\n🏆 **League Reminder:**\n` +
+      `Don't forget to start your league lobby and get seating order from the ` +
+      `**[Wanderer's League](https://app.cpdh.guide)** webapp.\n`;
   }
 
   dmMessage += `\n*Have a great game! 🎉*`;
