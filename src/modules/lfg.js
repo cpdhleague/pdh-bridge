@@ -232,7 +232,7 @@ async function handleLfgButton(interaction, config, client) {
     });
     
     // Update the embed on all servers to show new player count
-    await updateAllLfgEmbeds(client, postId);
+    await updateAllLfgEmbeds(client, postId, config);
     
     // CHECK: Is the lobby now full?
     if (result.currentPlayers >= result.maxPlayers) {
@@ -284,7 +284,7 @@ async function handleLfgButton(interaction, config, client) {
     });
     
     // Update the embed on all servers
-    await updateAllLfgEmbeds(client, postId);
+    await updateAllLfgEmbeds(client, postId, config);
     return;
   }
 }
@@ -466,37 +466,112 @@ function buildLfgButtons(postId, currentPlayers, maxPlayers) {
 // When someone joins or leaves, we need to update the embed
 // on every server to reflect the new player count and roster.
 //
-// LEARNING NOTE: This fetches each message by ID and edits it.
-// We use the webhook client to edit webhook-sent messages.
+// LEARNING NOTE ON WEBHOOK MESSAGES:
+// Messages sent via webhooks are "owned" by that webhook, not
+// by the bot. So you can't edit them with channel.messages.fetch()
+// — you must use the SAME webhook that sent them. That's why we
+// look up the webhook URL from the config for each server.
+//
+// This is a super common gotcha in Discord bot development.
+// Regular bot messages use: message.edit()
+// Webhook messages use:     webhookClient.editMessage(messageId, ...)
+// =============================================================
 
-async function updateAllLfgEmbeds(client, postId) {
+async function updateAllLfgEmbeds(client, postId, config) {
+  const { WebhookClient } = require('discord.js');
+  
   const post = db.getLfgPost(postId);
   if (!post) return;
   
   const messages = db.getLfgMessages(postId);
-  const embed = buildLfgEmbed(post, null);
-  const buttons = buildLfgButtons(postId, post.current_players, post.max_players);
+  const players = db.getLfgPlayers(postId);
+  const isFull = players.length >= post.max_players;
+  
+  // Build the updated embed (with current player roster)
+  const embed = isFull
+    ? buildFullLobbyEmbed(post, players)
+    : buildLfgEmbed(post, null);
+  
+  // Build buttons (or no buttons if full)
+  const components = isFull
+    ? []   // Remove all buttons when the lobby is full
+    : [buildLfgButtons(postId, players.length, post.max_players)];
   
   await Promise.allSettled(
     messages.map(async ({ guildId, channelId, messageId }) => {
       try {
-        const guild = client.guilds.cache.get(guildId);
-        if (!guild) return;
-        const channel = guild.channels.cache.get(channelId);
-        if (!channel) return;
+        // Look up this server's webhook URL from the config
+        const serverConfig = config?.servers?.[guildId];
+        const webhookUrl = serverConfig?.webhooks?.lfg;
         
-        const msg = await channel.messages.fetch(messageId).catch(() => null);
-        if (msg) {
-          await msg.edit({
-            embeds: [embed],
-            components: [buttons],
-          });
+        if (!webhookUrl) {
+          // Fallback: try editing as a regular message (works if the
+          // bot itself sent it, e.g. in a single-server setup)
+          const guild = client.guilds.cache.get(guildId);
+          if (!guild) return;
+          const channel = guild.channels.cache.get(channelId);
+          if (!channel) return;
+          const msg = await channel.messages.fetch(messageId).catch(() => null);
+          if (msg) {
+            await msg.edit({ embeds: [embed], components });
+          }
+          return;
         }
+        
+        // Use the webhook to edit ITS OWN message
+        const webhook = new WebhookClient({ url: webhookUrl });
+        await webhook.editMessage(messageId, {
+          embeds: [embed.toJSON ? embed.toJSON() : embed],
+          components,
+        });
       } catch (err) {
-        // Silent fail — message may have been deleted
+        console.error(`[LFG] Failed to update embed in guild ${guildId}:`, err.message);
       }
     })
   );
+}
+
+// =============================================================
+// BUILD THE "LOBBY FULL" EMBED
+// =============================================================
+// When 4 players join, the embed changes to a "Game Ready" state.
+// Buttons are removed, and the embed shows all 4 players.
+// This gives users visual confidence that the system worked.
+//
+// TO CUSTOMIZE THE LANGUAGE: Edit the strings in this function.
+// The setTitle, setDescription, and field values are all just
+// template strings you can change freely.
+// =============================================================
+
+function buildFullLobbyEmbed(post, players) {
+  const gameType = post.game_type || 'casual';
+  const display = GAME_TYPE_DISPLAY[gameType] || 'PDH Games';
+  const emoji = GAME_TYPE_EMOJI[gameType] || '🎮';
+  const isLeague = gameType === 'league';
+  
+  const rosterText = players.map((p, i) => {
+    const tag = i === 0 ? ' *(host)*' : '';
+    return `${i + 1}. ${p.username}${tag}`;
+  }).join('\n');
+  
+  const embed = new EmbedBuilder()
+    .setColor(0x57F287) // Green = success
+    .setTitle(`${emoji} ${display} — Game Ready!`)
+    .setDescription(
+      `All seats are filled! Check your DMs for a **Convoke** game link.` +
+      (isLeague ? `\n🏆 Remember to log your game at [cPDH Guide](https://app.cpdh.guide)!` : '')
+    )
+    .addFields(
+      { name: 'Players', value: rosterText },
+    )
+    .setFooter({ text: `LFG #${post.id} • Game started` })
+    .setTimestamp(new Date());
+  
+  if (post.notes && post.notes.trim().length > 0) {
+    embed.addFields({ name: 'Notes', value: `📝 ${post.notes}` });
+  }
+  
+  return embed;
 }
 
 // =============================================================

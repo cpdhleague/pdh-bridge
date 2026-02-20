@@ -208,11 +208,6 @@ function buildArticleEmbed(item, feed) {
     embed.setImage(imageUrl);
   }
   
-  // --- AUTHOR ---
-  if (item.creator || item.author) {
-    embed.setAuthor({ name: item.creator || item.author });
-  }
-  
   // Footer with feed name
   embed.setFooter({ text: feed.title || 'PDH News' });
   
