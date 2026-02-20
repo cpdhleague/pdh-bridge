@@ -1,0 +1,22 @@
+{
+  "name": "pdh-bridge-bot",
+  "version": "1.0.0",
+  "description": "Cross-server bridge bot for the PDH Discord community",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "deploy-commands": "node src/deploy-commands.js",
+    "setup": "node src/setup-wizard.js"
+  },
+  "dependencies": {
+    "bad-words": "^3.0.4",
+    "better-sqlite3": "^11.7.0",
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.7",
+    "rss-parser": "^3.13.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

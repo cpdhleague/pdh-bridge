@@ -1,0 +1,44 @@
+{
+  "servers": {
+    "1065820234889576538": {
+      "name": "cPDH.guide",
+      "channels": {
+        "news": "1473660135611306120",
+        "lfg": "1473659588623728671",
+        "discussion": "1473660678505238598"
+      },
+      "webhooks": {
+        "news": "https://discord.com/api/webhooks/1474083290045747444/Pyvwmj_s0O7he2Yj6UGL3ZXGYzrRLecH8wYQQ7gsg1jF0fAfw5OLHcrtuoNpoUnSDpKp",
+        "lfg": "https://discord.com/api/webhooks/1474083292356677896/-8RkXjy110Lb-C79RIZvhyi9BzGgRBtbGRSQL2PIvUtrGrNLBBBCmA94kTo69pMKm7AI",
+        "discussion": "https://discord.com/api/webhooks/1474083294781116600/vNf3PiQatkcX_IQgzAe8UYCnq1DRlsgaQuufAdPaxaQPZtc6_sOEb6PQjBi3eRGE_dJX"
+      },
+      "roles": {
+        "news": "1473661302403760260",
+        "lfg": "1400500584536215704"
+      }
+    },
+    "911062173457981460": {
+      "name": "Wanderer's Haul",
+      "channels": {
+        "news": "1474079828238929920",
+        "lfg": "1474079861499887647",
+        "discussion": "1474079896740429937"
+      },
+      "webhooks": {
+        "news": "https://discord.com/api/webhooks/1474083424196366634/7yR-N55dmtzQwj0WKfAvKpThjDHYafhJePLcGIbaccXrwr_YFw40Ehqv4GlADosaluIv",
+        "lfg": "https://discord.com/api/webhooks/1474083426939306034/oauU3ng62fuPGJb7unboY9M7qQSB9aP28nGSVyHRA3fwuipfPKiocLBgN893aiKAtynP",
+        "discussion": "https://discord.com/api/webhooks/1474083430147952854/dH3R9nT4u3I6SZZZ3TTY5XfIBFcr7lqCJt2w3oPjzYcZw655TyHUcEuX52nL8LFx69kV"
+      },
+      "roles": {
+        "news": "1474080206703693966",
+        "lfg": "1474080246528741377"
+      }
+    }
+  },
+  "settings": {
+    "filterLinks": false,
+    "lfgExpiryMinutes": 60,
+    "rssPollInterval": 10,
+    "rssFeedUrl": "https://cpdh.guide/feed.xml"
+  }
+}
