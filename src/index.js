@@ -20,7 +20,7 @@ const { moderateMessage } = require('./modules/moderation');
 const { startRssPolling, stopRssPolling } = require('./modules/news');
 const {
   handleLfgCommand, handleTypeSelection, handleLfgModalSubmit,
-  handleLfgButton, cleanupExpiredPosts,
+  handleLfgButton, cleanupExpiredPosts, wipeLfgChannels,
 } = require('./modules/lfg');
 const {
   handleBan, handleUnban, handleStrikes, handleConfig,
@@ -66,6 +66,35 @@ client.once(Events.ClientReady, async (readyClient) => {
   // LFG cleanup timer — checks every 60 seconds for expired posts
   setInterval(() => cleanupExpiredPosts(readyClient), 60 * 1000);
   
+  // =============================================================
+  // DAILY LFG CHANNEL WIPE — 3:00 AM Central Time
+  // =============================================================
+  // Checks every minute if it's 3:00 AM in the US/Central timezone.
+  // When it is, wipes all non-pinned messages from every LFG channel.
+  //
+  // LEARNING NOTE: Instead of adding a cron library (extra dependency),
+  // we use a simple "check every minute" approach. The _lastWipeDate
+  // variable prevents the wipe from running more than once per day
+  // (since the check runs every minute, without this guard it would
+  // fire ~60 times during the 3:00 AM hour).
+  // =============================================================
+  let _lastWipeDate = null;
+  setInterval(async () => {
+    // Get the current time in US Central (handles DST automatically)
+    const now = new Date();
+    const centralTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+    const hour = centralTime.getHours();
+    const minute = centralTime.getMinutes();
+    const today = centralTime.toDateString();
+    
+    // Trigger at 3:00 AM Central, but only once per day
+    if (hour === 3 && minute === 0 && _lastWipeDate !== today) {
+      _lastWipeDate = today;
+      console.log('[Bot] 3:00 AM Central — starting daily LFG channel wipe');
+      await wipeLfgChannels(readyClient, bridgeConfig);
+    }
+  }, 60 * 1000); // Check every 60 seconds
+  
   console.log('[Bot] All systems ready!');
 });
 
@@ -83,10 +112,12 @@ client.on(Events.MessageCreate, async (message) => {
   
   const { channelType } = channelInfo;
   
-  // --- NEWS: Only the bot owner can post ---
+  // --- NEWS: Never relay human messages ---
+  // News channels are RSS-only. The news module (news.js) handles
+  // broadcasting articles directly via webhooks — it doesn't go
+  // through this message handler at all. So we simply ignore
+  // everything here, regardless of who sent it.
   if (channelType === 'news') {
-    if (message.author.id !== env.ownerId) return;
-    await relayMessage(bridgeConfig, message, 'news', { pingRole: true });
     return;
   }
   

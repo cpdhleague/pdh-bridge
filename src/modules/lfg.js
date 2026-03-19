@@ -25,9 +25,6 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
 } = require('discord.js');
 const { broadcastEmbed, deleteAcrossServers } = require('../bridge');
 const db = require('../database');
@@ -51,6 +48,17 @@ const GAME_TYPE_EMOJI = {
 const GAME_TYPE_COLOR = {
   league: 0xF1C40F, // Gold
   casual: 0x57F287,  // Green
+};
+
+// =============================================================
+// THUMBNAIL IMAGES for embed posts
+// Change these URLs to your own images!
+// Recommended size: 128x128 or 256x256 pixels.
+// Must be a direct link to an image file (PNG, JPG, GIF).
+// =============================================================
+const GAME_TYPE_THUMBNAIL = {
+  league: 'https://raw.githubusercontent.com/TryhardClay/PDH-LFG-Bot/main/PDHBot.jpg',
+  casual: 'https://raw.githubusercontent.com/TryhardClay/PDH-LFG-Bot/main/PDHBot.jpg',
 };
 
 // =============================================================
@@ -81,43 +89,18 @@ async function handleLfgCommand(interaction) {
 // =============================================================
 // STEP 2: Handle game type button click
 // =============================================================
-// League games → skip notes, create post immediately
-// Casual games → show notes modal for house rules, start time, etc.
-//
-// LEARNING NOTE: This is a design decision based on the rules.
-// Wanderer's League games have standardized rules — there's nothing
-// to customize. Adding a notes step would just slow players down.
-// Casual games benefit from notes (house rules, power level, etc.)
+// Both League and Non-League now post immediately — no extra
+// popups or modals. One click and you're looking for a game.
+// This emulates SpellBot's streamlined approach.
 // =============================================================
 
 async function handleTypeSelection(interaction, config) {
   const gameType = interaction.customId.replace('lfg_type_', '');
   
-  // League games: skip the modal entirely, create the post now
-  if (gameType === 'league') {
-    await createAndBroadcastLfg(interaction, config, gameType, '');
-    return;
-  }
-  
-  // Casual games: show the notes modal
-  const modal = new ModalBuilder()
-    .setCustomId(`lfg_modal_${gameType}`)
-    .setTitle(`Create LFG — ${GAME_TYPE_DISPLAY[gameType]}`);
-  
-  // Notes field (optional) — for start time, house rules, etc.
-  const notesInput = new TextInputBuilder()
-    .setCustomId('lfg_notes')
-    .setLabel('Notes (start time, house rules, etc.)')
-    .setStyle(TextInputStyle.Paragraph)
-    .setPlaceholder('e.g., Starting in 15 minutes, no infinites, casual power level')
-    .setMaxLength(500)
-    .setRequired(false);
-  
-  modal.addComponents(
-    new ActionRowBuilder().addComponents(notesInput),
-  );
-  
-  await interaction.showModal(modal);
+  // SIMPLIFIED FLOW (emulating SpellBot):
+  // Both game types now post immediately — no modal, no extra popups.
+  // One click on League or Non-League and you're in.
+  await createAndBroadcastLfg(interaction, config, gameType, '');
 }
 
 // =============================================================
@@ -466,8 +449,12 @@ function buildLfgEmbed(post, user) {
     embed.setDescription(`📝 ${post.notes}`);
   }
   
-  if (user) {
-    embed.setThumbnail(user.displayAvatarURL({ size: 64 }));
+  // Use the game-type logo instead of the user's personal avatar.
+  // This keeps branding consistent — league posts show the league logo,
+  // casual posts show a generic PDH/MTG logo.
+  const thumbnail = GAME_TYPE_THUMBNAIL[gameType] || GAME_TYPE_THUMBNAIL.casual;
+  if (thumbnail) {
+    embed.setThumbnail(thumbnail);
   }
   
   return embed;
@@ -718,12 +705,122 @@ async function postPinnedExplanation(channel) {
   }
 }
 
+// =============================================================
+// DAILY CHANNEL WIPE
+// =============================================================
+// Deletes all non-pinned messages in every LFG channel at 3am
+// Central time. Pinned messages (like the explanation post) survive.
+//
+// LEARNING NOTE ON BULK DELETE:
+// Discord's bulkDelete() can remove up to 100 messages at once,
+// but only if they're less than 14 days old. For older messages,
+// we have to delete them one-by-one. We handle both cases.
+//
+// LEARNING NOTE ON TIMEZONES:
+// We use JavaScript's Intl API to check the current time in
+// "America/Chicago" (US Central). This automatically handles
+// Daylight Saving Time — you don't need to manually adjust
+// for CST vs CDT.
+// =============================================================
+
+async function wipeLfgChannels(client, config) {
+  console.log('[LFG] Starting daily LFG channel wipe...');
+  
+  for (const [guildId, server] of Object.entries(config.servers)) {
+    const lfgChannelId = server.channels?.lfg;
+    if (!lfgChannelId) continue;
+    
+    try {
+      const guild = client.guilds.cache.get(guildId);
+      if (!guild) {
+        console.log(`[LFG] Wipe: Not in guild ${guildId}, skipping`);
+        continue;
+      }
+      
+      const channel = guild.channels.cache.get(lfgChannelId);
+      if (!channel) {
+        console.log(`[LFG] Wipe: Channel ${lfgChannelId} not found in ${guild.name}, skipping`);
+        continue;
+      }
+      
+      // Fetch messages in batches (Discord API returns max 100 at a time)
+      let deletedCount = 0;
+      let lastMessageId = null;
+      let keepFetching = true;
+      
+      while (keepFetching) {
+        const fetchOptions = { limit: 100 };
+        if (lastMessageId) fetchOptions.before = lastMessageId;
+        
+        const messages = await channel.messages.fetch(fetchOptions);
+        if (messages.size === 0) break;
+        
+        // Filter out pinned messages — those stay
+        const toDelete = messages.filter(msg => !msg.pinned);
+        
+        if (toDelete.size > 0) {
+          // Try bulkDelete first (only works for messages < 14 days old)
+          try {
+            const deleted = await channel.bulkDelete(toDelete, true); // true = filter old messages
+            deletedCount += deleted.size;
+            
+            // If bulkDelete filtered some out (too old), delete those one-by-one
+            const remaining = toDelete.filter(msg => !deleted.has(msg.id));
+            for (const [, msg] of remaining) {
+              try {
+                await msg.delete();
+                deletedCount++;
+                // Small delay to avoid rate limits on individual deletes
+                await new Promise(r => setTimeout(r, 500));
+              } catch (e) {
+                // Message may already be deleted, skip
+              }
+            }
+          } catch (err) {
+            // bulkDelete failed entirely — delete one by one
+            for (const [, msg] of toDelete) {
+              try {
+                await msg.delete();
+                deletedCount++;
+                await new Promise(r => setTimeout(r, 500));
+              } catch (e) {
+                // Skip if already deleted
+              }
+            }
+          }
+        }
+        
+        // If we got fewer than 100, there are no more messages
+        if (messages.size < 100) {
+          keepFetching = false;
+        } else {
+          lastMessageId = messages.last().id;
+        }
+      }
+      
+      console.log(`[LFG] Wipe: Deleted ${deletedCount} messages in #${channel.name} on ${guild.name} (pinned messages preserved)`);
+      
+    } catch (err) {
+      console.error(`[LFG] Wipe failed for guild ${guildId}:`, err.message);
+    }
+  }
+  
+  // Also clear any expired/stale LFG posts from the database
+  const expired = db.getExpiredLfgPosts();
+  for (const post of expired) {
+    db.markLfgExpired(post.id);
+  }
+  
+  console.log('[LFG] Daily wipe complete.');
+}
+
 module.exports = {
   handleLfgCommand,
   handleTypeSelection,
   handleLfgModalSubmit,
   handleLfgButton,
   cleanupExpiredPosts,
+  wipeLfgChannels,
   postPinnedExplanation,
   GAME_TYPE_DISPLAY,
 };
