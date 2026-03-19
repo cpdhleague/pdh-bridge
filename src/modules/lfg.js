@@ -36,8 +36,8 @@ const { env } = require('../config');
 // These map internal values to what users see in embeds
 // =============================================================
 const GAME_TYPE_DISPLAY = {
-  league: 'PDH — League',
-  casual: 'PDH Games',
+  league: 'PDH — Wanderer\'s League',
+  casual: 'PDH Game',
 };
 
 const GAME_TYPE_EMOJI = {
@@ -684,8 +684,8 @@ async function postPinnedExplanation(channel) {
       '4. Your post appears on every PDH server in the network\n' +
       '5. When all 4 seats fill, everyone gets a DM with an **auto-generated Convoke Games room link** — just click and play!\n\n' +
       '**Game Types:**\n' +
-      '🏆 **PDH — League** — Wanderer\'s League sanctioned games. When the lobby fills, you\'ll also get a reminder to log your game at [cPDH Guide](https://app.cpdh.guide)\n' +
-      '🎮 **PDH Games** — Casual, non-league games\n\n' +
+      '🏆 **PDH — Wanderer\'s League** — Wanderer\'s League sanctioned games. When the lobby fills, you\'ll also get a reminder to log your game at [cPDH Guide](https://app.cpdh.guide)\n' +
+      '🎮 **PDH Game** — Casual, non-league games\n\n' +
       '**Tips:**\n' +
       '• Posts auto-expire after 1 hour if they don\'t fill\n' +
       '• The host can cancel at any time with the Cancel button\n' +
