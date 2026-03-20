@@ -57,7 +57,7 @@ const GAME_TYPE_COLOR = {
 // Must be a direct link to an image file (PNG, JPG, GIF).
 // =============================================================
 const GAME_TYPE_THUMBNAIL = {
-  league: 'https://raw.githubusercontent.com/TryhardClay/PDH-LFG-Bot/main/PDHBot.jpg',
+  league: 'https://raw.githubusercontent.com/cpdhleague/Guide-book/master/assets/WL_logo.png',
   casual: 'https://raw.githubusercontent.com/TryhardClay/PDH-LFG-Bot/main/PDHBot.jpg',
 };
 
