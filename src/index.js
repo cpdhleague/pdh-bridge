@@ -186,7 +186,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isModalSubmit()) {
       // LFG modal: "lfg_modal_league" or "lfg_modal_casual"
       if (interaction.customId.startsWith('lfg_modal_')) {
-        await handleLfgModalSubmit(interaction, bridgeConfig);
+        await handleLfgModalSubmit(interaction, bridgeConfig, client);
       }
     }
     
@@ -194,7 +194,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isButton()) {
       // LFG game type selection: "lfg_type_league" or "lfg_type_casual"
       if (interaction.customId.startsWith('lfg_type_')) {
-        await handleTypeSelection(interaction, bridgeConfig);
+        await handleTypeSelection(interaction, bridgeConfig, client);
         return;
       }
       

@@ -26,7 +26,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
 } = require('discord.js');
-const { broadcastEmbed, deleteAcrossServers } = require('../bridge');
+const { deleteAcrossServers } = require('../bridge');
 const db = require('../database');
 const { createConvokeRoom } = require('./convoke');
 const { env } = require('../config');
@@ -36,8 +36,8 @@ const { env } = require('../config');
 // These map internal values to what users see in embeds
 // =============================================================
 const GAME_TYPE_DISPLAY = {
-  league: 'PDH — Wanderer\'s League',
-  casual: 'PDH Game',
+  league: 'PDH — League',
+  casual: 'PDH Games',
 };
 
 const GAME_TYPE_EMOJI = {
@@ -57,7 +57,7 @@ const GAME_TYPE_COLOR = {
 // Must be a direct link to an image file (PNG, JPG, GIF).
 // =============================================================
 const GAME_TYPE_THUMBNAIL = {
-  league: 'https://raw.githubusercontent.com/cpdhleague/Guide-book/master/assets/images/WL_logo.png',
+  league: 'https://raw.githubusercontent.com/TryhardClay/PDH-LFG-Bot/main/PDHBot.jpg',
   casual: 'https://raw.githubusercontent.com/TryhardClay/PDH-LFG-Bot/main/PDHBot.jpg',
 };
 
@@ -94,35 +94,47 @@ async function handleLfgCommand(interaction) {
 // This emulates SpellBot's streamlined approach.
 // =============================================================
 
-async function handleTypeSelection(interaction, config) {
+async function handleTypeSelection(interaction, config, client) {
   const gameType = interaction.customId.replace('lfg_type_', '');
   
   // SIMPLIFIED FLOW (emulating SpellBot):
   // Both game types now post immediately — no modal, no extra popups.
   // One click on League or Non-League and you're in.
-  await createAndBroadcastLfg(interaction, config, gameType, '');
+  await createAndBroadcastLfg(interaction, config, gameType, '', client);
 }
 
 // =============================================================
-// STEP 3a: Handle modal submit (casual games only)
+// STEP 3a: Handle modal submit (legacy — modal is currently disabled)
 // =============================================================
 
-async function handleLfgModalSubmit(interaction, config) {
-  // Extract game type from the modal's custom ID
+async function handleLfgModalSubmit(interaction, config, client) {
   const gameType = interaction.customId.replace('lfg_modal_', '');
   const notes = interaction.fields.getTextInputValue('lfg_notes') || '';
   
-  await createAndBroadcastLfg(interaction, config, gameType, notes);
+  await createAndBroadcastLfg(interaction, config, gameType, notes, client);
 }
 
 // =============================================================
 // STEP 3b: Create & broadcast the LFG post
 // =============================================================
-// This is the shared function that both league (direct from button)
-// and casual (from modal submit) game flows call.
+// KEY DESIGN CHANGE: We now send LFG posts directly as the bot
+// (using channel.send()) instead of through webhooks.
+//
+// WHY? Webhook messages can only be edited by the same webhook
+// that sent them. If the webhook gets recreated (which Discord
+// does sometimes), edits silently fail and the embed never updates.
+//
+// By sending as the bot itself, we OWN the messages and can always
+// edit them — just like SpellBot does. This makes roster updates,
+// join/leave changes, and the "game started" transition reliable.
+//
+// The tradeoff: LFG posts show as "PDH Bridge" (the bot) instead
+// of a custom webhook name. But for LFG posts, that's actually
+// what you want — they should look like system messages, not
+// user messages.
 // =============================================================
 
-async function createAndBroadcastLfg(interaction, config, gameType, notes) {
+async function createAndBroadcastLfg(interaction, config, gameType, notes, client) {
   const maxPlayers = 4; // Always 4 for PDH
   
   // Calculate expiry time
@@ -162,28 +174,43 @@ async function createAndBroadcastLfg(interaction, config, gameType, notes) {
     ephemeral: true,
   });
   
-  // Broadcast to ALL servers (including this one)
-  // NOTE: We do NOT pass includeSource or excludeGuildId here.
-  // getRelayTargets() returns ALL configured servers by default,
-  // which includes the server where /lfg was used. The earlier
-  // bug was that includeSource ADDED the host server a second time
-  // on top of it already being in the list — causing double posts.
-  try {
-    const results = await broadcastEmbed(config, 'lfg', embed, {
-      username: 'PDH LFG',
-      pingRole: true,
-      components: [buttons],
-    });
+  // Send directly to each server's LFG channel as the bot
+  let sentCount = 0;
+  for (const [guildId, server] of Object.entries(config.servers)) {
+    const lfgChannelId = server.channels?.lfg;
+    if (!lfgChannelId) continue;
     
-    // Track every message ID so we can delete across all servers later
-    for (const result of results) {
-      db.addLfgMessage(lfgPostId, result.guildId, result.channelId, result.messageId);
+    try {
+      const guild = client.guilds.cache.get(guildId);
+      if (!guild) continue;
+      
+      const channel = guild.channels.cache.get(lfgChannelId);
+      if (!channel) continue;
+      
+      // Build the message payload
+      const payload = {
+        embeds: [embed],
+        components: [buttons],
+      };
+      
+      // Ping the @LFG-Network role if configured
+      const rolePing = server.roles?.lfg;
+      if (rolePing) {
+        payload.content = `<@&${rolePing}>`;
+        payload.allowedMentions = { roles: [rolePing] };
+      }
+      
+      const sent = await channel.send(payload);
+      
+      // Track the message so we can update/delete it later
+      db.addLfgMessage(lfgPostId, guildId, lfgChannelId, sent.id);
+      sentCount++;
+    } catch (err) {
+      console.error(`[LFG] Failed to send to guild ${guildId}:`, err.message);
     }
-    
-    console.log(`[LFG] Post #${lfgPostId} (${GAME_TYPE_DISPLAY[gameType]}) broadcast to ${results.length} servers`);
-  } catch (err) {
-    console.error('[LFG] Failed to broadcast:', err.message);
   }
+  
+  console.log(`[LFG] Post #${lfgPostId} (${GAME_TYPE_DISPLAY[gameType]}) sent to ${sentCount} servers`);
 }
 
 // =============================================================
@@ -497,25 +524,20 @@ function buildLfgButtons(postId, currentPlayers, maxPlayers) {
 // =============================================================
 // UPDATE EMBEDS ACROSS ALL SERVERS
 // =============================================================
-// When someone joins or leaves, we need to update the embed
-// on every server to reflect the new player count and roster.
+// When someone joins or leaves, we update the embed on every
+// server to show the current player roster.
 //
-// LEARNING NOTE ON WEBHOOK MESSAGES:
-// Messages sent via webhooks are "owned" by that webhook, not
-// by the bot. So you can't edit them with channel.messages.fetch()
-// — you must use the SAME webhook that sent them. That's why we
-// look up the webhook URL from the config for each server.
+// Since we now send LFG posts directly as the bot (not through
+// webhooks), we can simply fetch each message and call .edit()
+// on it. The bot always has permission to edit its own messages.
 //
-// CRITICAL: When editing webhook messages, the components (buttons)
-// must be serialized to JSON. Passing raw ActionRow objects works
-// for webhook.send() but NOT for webhook.editMessage(). This was
-// the root cause of the "embeds don't update" bug — the edit call
-// was throwing an error that got silently caught.
+// When the lobby fills (4/4 players), the embed transitions to
+// a "Game Started" state — buttons are removed and the embed
+// tells other players this game is full and already underway.
+// This is the same pattern SpellBot uses.
 // =============================================================
 
 async function updateAllLfgEmbeds(client, postId, config) {
-  const { WebhookClient } = require('discord.js');
-  
   const post = db.getLfgPost(postId);
   if (!post) return;
   
@@ -523,83 +545,51 @@ async function updateAllLfgEmbeds(client, postId, config) {
   const players = db.getLfgPlayers(postId);
   const isFull = players.length >= post.max_players;
   
-  // Build the updated embed (with current player roster)
+  // Build the updated embed with current player roster
   const embed = isFull
     ? buildFullLobbyEmbed(post, players)
     : buildLfgEmbed(post, null);
   
-  // Build buttons: Join button disappears when full, Leave/Cancel stay
-  const buttonRow = isFull
-    ? []   // No buttons at all when full (embed shows "Game Ready")
+  // When full: remove all buttons (game is started, no more actions)
+  // When not full: show Join/Leave/Cancel buttons
+  const components = isFull
+    ? []
     : [buildLfgButtons(postId, players.length, post.max_players)];
-  
-  // LEARNING NOTE: We need TWO versions of the embed and components —
-  // one for regular message edits (raw objects), one for webhook edits
-  // (serialized JSON). This is because discord.js WebhookClient.editMessage()
-  // requires plain JSON, while regular Message.edit() accepts builder objects.
-  const embedJson = embed.toJSON ? embed.toJSON() : embed;
-  const componentsJson = buttonRow.map(c => c.toJSON ? c.toJSON() : c);
 
   console.log(`[LFG] Updating embeds for post #${postId} across ${messages.length} servers (${players.length}/${post.max_players} players)`);
   
-  const results = await Promise.allSettled(
-    messages.map(async ({ guildId, channelId, messageId }) => {
-      // Look up this server's webhook URL from the config
-      const serverConfig = config?.servers?.[guildId];
-      const webhookUrl = serverConfig?.webhooks?.lfg;
-      
-      if (!webhookUrl) {
-        // No webhook URL for this server — try editing as a regular message.
-        // This only works if the bot itself sent it (not via webhook).
-        console.warn(`[LFG] No webhook URL for guild ${guildId} — attempting regular edit`);
-        try {
-          const guild = client.guilds.cache.get(guildId);
-          if (!guild) { console.warn(`[LFG] Guild ${guildId} not in cache`); return; }
-          const channel = guild.channels.cache.get(channelId);
-          if (!channel) { console.warn(`[LFG] Channel ${channelId} not in cache`); return; }
-          const msg = await channel.messages.fetch(messageId).catch(() => null);
-          if (msg) {
-            await msg.edit({ embeds: [embed], components: buttonRow });
-            console.log(`[LFG] Updated embed in guild ${guildId} via regular edit`);
-          } else {
-            console.warn(`[LFG] Message ${messageId} not found in channel ${channelId}`);
-          }
-        } catch (err) {
-          console.error(`[LFG] Regular edit failed for guild ${guildId}:`, err.message);
-        }
-        return;
+  let updatedCount = 0;
+  
+  for (const { guildId, channelId, messageId } of messages) {
+    try {
+      const guild = client.guilds.cache.get(guildId);
+      if (!guild) {
+        console.warn(`[LFG] Update: Guild ${guildId} not in cache`);
+        continue;
       }
       
-      // Use the webhook to edit ITS OWN message
-      try {
-        const webhook = new WebhookClient({ url: webhookUrl });
-        await webhook.editMessage(messageId, {
-          embeds: [embedJson],
-          components: componentsJson,
-        });
-        console.log(`[LFG] Updated embed in guild ${guildId} via webhook`);
-      } catch (err) {
-        console.error(`[LFG] Webhook edit FAILED for guild ${guildId}, message ${messageId}:`, err.message);
-        
-        // FALLBACK: If webhook edit fails, try fetching and editing
-        // the message directly. This can happen if the webhook was
-        // recreated or the message ownership is confused.
-        try {
-          const guild = client.guilds.cache.get(guildId);
-          if (!guild) return;
-          const channel = guild.channels.cache.get(channelId);
-          if (!channel) return;
-          const msg = await channel.messages.fetch(messageId).catch(() => null);
-          if (msg) {
-            await msg.edit({ embeds: [embed], components: buttonRow });
-            console.log(`[LFG] Fallback regular edit succeeded for guild ${guildId}`);
-          }
-        } catch (fallbackErr) {
-          console.error(`[LFG] Fallback edit also failed for guild ${guildId}:`, fallbackErr.message);
-        }
+      const channel = guild.channels.cache.get(channelId);
+      if (!channel) {
+        console.warn(`[LFG] Update: Channel ${channelId} not in cache for ${guild.name}`);
+        continue;
       }
-    })
-  );
+      
+      // Fetch the message and edit it directly.
+      // This works reliably because the bot sent the message itself.
+      const msg = await channel.messages.fetch(messageId).catch(() => null);
+      if (!msg) {
+        console.warn(`[LFG] Update: Message ${messageId} not found in ${guild.name}`);
+        continue;
+      }
+      
+      await msg.edit({ embeds: [embed], components });
+      updatedCount++;
+    } catch (err) {
+      console.error(`[LFG] Update failed for guild ${guildId}:`, err.message);
+    }
+  }
+  
+  console.log(`[LFG] Updated ${updatedCount}/${messages.length} embeds for post #${postId}`);
 }
 
 // =============================================================
@@ -619,6 +609,7 @@ function buildFullLobbyEmbed(post, players) {
   const display = GAME_TYPE_DISPLAY[gameType] || 'PDH Games';
   const emoji = GAME_TYPE_EMOJI[gameType] || '🎮';
   const isLeague = gameType === 'league';
+  const thumbnail = GAME_TYPE_THUMBNAIL[gameType] || GAME_TYPE_THUMBNAIL.casual;
   
   const rosterText = players.map((p, i) => {
     const tag = i === 0 ? ' *(host)*' : '';
@@ -626,17 +617,23 @@ function buildFullLobbyEmbed(post, players) {
   }).join('\n');
   
   const embed = new EmbedBuilder()
-    .setColor(0x57F287) // Green = success
-    .setTitle(`${emoji} ${display} — Game Ready!`)
+    .setColor(0x5865F2) // Discord blurple = completed/info state
+    .setTitle(`${emoji} ${display} — Game Started!`)
     .setDescription(
-      `All seats are filled! Check your DMs for a **Convoke** game link.` +
-      (isLeague ? `\n🏆 Remember to log your game at [cPDH Guide](https://app.cpdh.guide)!` : '')
+      `🟢 **This game is full and in progress.**\n` +
+      `All players have been sent their Convoke game link via DM.\n\n` +
+      `*Looking to play? Type \`/lfg\` to start a new game!*` +
+      (isLeague ? `\n\n🏆 League game — results logged at [cPDH Guide](https://app.cpdh.guide)` : '')
     )
     .addFields(
       { name: 'Players', value: rosterText },
     )
-    .setFooter({ text: `LFG #${post.id} • Game started` })
+    .setFooter({ text: `LFG #${post.id} • Game in progress` })
     .setTimestamp(new Date());
+  
+  if (thumbnail) {
+    embed.setThumbnail(thumbnail);
+  }
   
   if (post.notes && post.notes.trim().length > 0) {
     embed.addFields({ name: 'Notes', value: `📝 ${post.notes}` });
@@ -684,8 +681,8 @@ async function postPinnedExplanation(channel) {
       '4. Your post appears on every PDH server in the network\n' +
       '5. When all 4 seats fill, everyone gets a DM with an **auto-generated Convoke Games room link** — just click and play!\n\n' +
       '**Game Types:**\n' +
-      '🏆 **PDH — Wanderer\'s League** — Wanderer\'s League sanctioned games. When the lobby fills, you\'ll also get a reminder to log your game at [cPDH Guide](https://app.cpdh.guide)\n' +
-      '🎮 **PDH Game** — Casual, non-league games\n\n' +
+      '🏆 **PDH — League** — Wanderer\'s League sanctioned games. When the lobby fills, you\'ll also get a reminder to log your game at [cPDH Guide](https://app.cpdh.guide)\n' +
+      '🎮 **PDH Games** — Casual, non-league games\n\n' +
       '**Tips:**\n' +
       '• Posts auto-expire after 1 hour if they don\'t fill\n' +
       '• The host can cancel at any time with the Cancel button\n' +
