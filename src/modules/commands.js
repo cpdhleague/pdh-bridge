@@ -103,18 +103,161 @@ async function handleSetup(interaction, config) {
     await interaction.reply({ content: 'You don\'t have permission to use this command.', ephemeral: true });
     return;
   }
-  const newsChannel = interaction.options.getChannel('news-channel');
-  const lfgChannel = interaction.options.getChannel('lfg-channel');
-  const discussionChannel = interaction.options.getChannel('discussion-channel');
-  const newsRole = interaction.options.getRole('news-role');
-  const lfgRole = interaction.options.getRole('lfg-role');
+  let newsChannel = interaction.options.getChannel('news-channel');
+  let lfgChannel = interaction.options.getChannel('lfg-channel');
+  let discussionChannel = interaction.options.getChannel('discussion-channel');
+  let newsRole = interaction.options.getRole('news-role');
+  let lfgRole = interaction.options.getRole('lfg-role');
   
   await interaction.deferReply({ ephemeral: true });
   
   const { ensureWebhook } = require('../bridge');
   const { setServer } = require('../config');
+  const { ChannelType, PermissionsBitField } = require('discord.js');
   
   const botUser = interaction.client.user;
+  const botMember = interaction.guild.members.cache.get(botUser.id)
+    || await interaction.guild.members.fetch(botUser.id).catch(() => null);
+  
+  let createdItems = [];
+  
+  // =============================================================
+  // AUTO-CREATE ROLES IF NOT PROVIDED
+  // =============================================================
+  // Creates @news and @LFG-Network roles if they don't already
+  // exist on the server. These are self-assignable ping roles
+  // that players opt into to get notified.
+  //
+  // LEARNING NOTE ON ROLE POSITIONING:
+  // Discord roles are ranked by position — higher position = more
+  // authority. The bot can only manage roles BELOW its own role.
+  // We position these roles at position 1, which is just above
+  // @everyone (position 0). This ensures they work correctly
+  // for pinging without granting any extra powers.
+  // =============================================================
+  
+  try {
+    if (!newsRole) {
+      // Check if @news already exists
+      newsRole = interaction.guild.roles.cache.find(
+        r => r.name.toLowerCase() === 'news'
+      );
+      if (!newsRole) {
+        newsRole = await interaction.guild.roles.create({
+          name: 'news',
+          mentionable: true,
+          reason: 'PDH Bridge Bot — auto-created for news pings',
+        });
+        createdItems.push('📢 Role: @news');
+      }
+    }
+    
+    if (!lfgRole) {
+      // Check if @LFG-Network already exists
+      lfgRole = interaction.guild.roles.cache.find(
+        r => r.name.toLowerCase() === 'lfg-network'
+      );
+      if (!lfgRole) {
+        lfgRole = await interaction.guild.roles.create({
+          name: 'LFG-Network',
+          mentionable: true,
+          reason: 'PDH Bridge Bot — auto-created for LFG pings',
+        });
+        createdItems.push('🎮 Role: @LFG-Network');
+      }
+    }
+  } catch (err) {
+    console.error(`[Setup] Failed to create roles:`, err.message);
+    // Non-fatal — continue setup without roles
+  }
+  
+  // =============================================================
+  // AUTO-CREATE CHANNELS IF NOT PROVIDED
+  // =============================================================
+  // Creates a "PDH Network" category with three channels:
+  //   1. #pdh-commons  (cross-server chat)
+  //   2. #pdh-news     (RSS articles)
+  //   3. #pdh-lfg      (matchmaking + scheduling)
+  //
+  // Channels are positioned in this specific order within the
+  // category so the most social channel is on top.
+  // =============================================================
+  
+  if (!newsChannel || !lfgChannel || !discussionChannel) {
+    let category = null;
+    try {
+      // Check if a "PDH Network" category already exists
+      category = interaction.guild.channels.cache.find(
+        c => c.type === ChannelType.GuildCategory &&
+             c.name.toLowerCase().includes('pdh')
+      );
+      
+      if (!category) {
+        category = await interaction.guild.channels.create({
+          name: 'PDH Network',
+          type: ChannelType.GuildCategory,
+          reason: 'PDH Bridge Bot — auto-created during setup',
+        });
+        createdItems.push('📁 Category: PDH Network');
+      }
+    } catch (err) {
+      console.error(`[Setup] Failed to create category:`, err.message);
+      await interaction.editReply({
+        content: `❌ Failed to create category. Make sure the bot has **Manage Channels** permission.\n\nError: ${err.message}`
+      });
+      return;
+    }
+    
+    try {
+      // Create channels in display order: commons, news, lfg
+      // Discord sorts channels within a category by "position" value.
+      // Lower position = higher in the list.
+      
+      if (!discussionChannel) {
+        discussionChannel = await interaction.guild.channels.create({
+          name: 'pdh-commons',
+          type: ChannelType.GuildText,
+          parent: category,
+          position: 0,
+          topic: '💬 PDH Commons — Chat with players across all PDH servers.',
+          reason: 'PDH Bridge Bot — auto-created during setup',
+        });
+        createdItems.push('💬 #pdh-commons');
+      }
+      
+      if (!newsChannel) {
+        newsChannel = await interaction.guild.channels.create({
+          name: 'pdh-news',
+          type: ChannelType.GuildText,
+          parent: category,
+          position: 1,
+          topic: '📰 PDH News — Articles and updates from across the PDH community.',
+          reason: 'PDH Bridge Bot — auto-created during setup',
+        });
+        createdItems.push('📰 #pdh-news');
+      }
+      
+      if (!lfgChannel) {
+        lfgChannel = await interaction.guild.channels.create({
+          name: 'pdh-lfg',
+          type: ChannelType.GuildText,
+          parent: category,
+          position: 2,
+          topic: '🎮 PDH LFG — Find games across the PDH network! Type /lfg to start.',
+          reason: 'PDH Bridge Bot — auto-created during setup',
+        });
+        createdItems.push('🎮 #pdh-lfg');
+      }
+    } catch (err) {
+      console.error(`[Setup] Failed to create channels:`, err.message);
+      await interaction.editReply({
+        content: `❌ Failed to create channels. Make sure the bot has **Manage Channels** permission.\n\nError: ${err.message}`
+      });
+      return;
+    }
+  }
+  
+  // Set up webhooks
   const newsWebhook = newsChannel ? await ensureWebhook(newsChannel, botUser) : null;
   const lfgWebhook = lfgChannel ? await ensureWebhook(lfgChannel, botUser) : null;
   const discussionWebhook = discussionChannel ? await ensureWebhook(discussionChannel, botUser) : null;
@@ -139,15 +282,104 @@ async function handleSetup(interaction, config) {
   
   setServer(config, interaction.guild.id, serverData);
   
+  // =============================================================
+  // AUTO-CONFIGURE CHANNEL PERMISSIONS
+  // =============================================================
+  
+  let permsStatus = '';
+  const everyone = interaction.guild.roles.everyone;
+  
+  try {
+    // --- #pdh-news: Read-only (no human messages) ---
+    if (newsChannel) {
+      await newsChannel.permissionOverwrites.edit(everyone, {
+        SendMessages: false,
+        AddReactions: true,
+        EmbedLinks: true,
+      });
+      if (botMember) {
+        await newsChannel.permissionOverwrites.edit(botMember, {
+          SendMessages: true,
+          ManageWebhooks: true,
+          ManageMessages: true,
+          EmbedLinks: true,
+          MentionEveryone: true,
+        });
+      }
+      permsStatus += '📰 News permissions ✅\n';
+    }
+    
+    // --- #pdh-lfg: Open chat + LFG commands ---
+    if (lfgChannel) {
+      await lfgChannel.permissionOverwrites.edit(everyone, {
+        SendMessages: true,
+        UseApplicationCommands: true,
+        AttachFiles: true,
+        EmbedLinks: true,
+        ReadMessageHistory: true,
+        MentionEveryone: false,
+      });
+      if (botMember) {
+        await lfgChannel.permissionOverwrites.edit(botMember, {
+          SendMessages: true,
+          ManageWebhooks: true,
+          ManageMessages: true,
+          EmbedLinks: true,
+          AttachFiles: true,
+          MentionEveryone: true,
+        });
+      }
+      permsStatus += '🎮 LFG permissions ✅\n';
+    }
+    
+    // --- #pdh-commons: Open chat ---
+    if (discussionChannel) {
+      await discussionChannel.permissionOverwrites.edit(everyone, {
+        SendMessages: true,
+        AttachFiles: true,
+        EmbedLinks: true,
+        ReadMessageHistory: true,
+        MentionEveryone: false,
+      });
+      if (botMember) {
+        await discussionChannel.permissionOverwrites.edit(botMember, {
+          SendMessages: true,
+          ManageWebhooks: true,
+          ManageMessages: true,
+          EmbedLinks: true,
+          AttachFiles: true,
+          MentionEveryone: true,
+        });
+      }
+      permsStatus += '💬 Commons permissions ✅\n';
+    }
+  } catch (err) {
+    permsStatus += `⚠️ Some permissions couldn't be set: ${err.message}\n`;
+    permsStatus += 'Make sure the bot role is above @everyone in Server Settings > Roles.\n';
+    console.error(`[Setup] Permission configuration failed for ${interaction.guild.name}:`, err.message);
+  }
+  
+  // Build the confirmation message
   let confirmation = `✅ **${interaction.guild.name}** is now part of the PDH bridge!\n\n`;
+  
+  if (createdItems.length > 0) {
+    confirmation += `**Created:**\n${createdItems.join('\n')}\n\n`;
+  }
+  
+  confirmation += `**Channels:**\n`;
+  if (discussionChannel) confirmation += `💬 Commons: ${discussionChannel} ${discussionWebhook ? '✅' : '❌ webhook failed'}\n`;
   if (newsChannel) confirmation += `📰 News: ${newsChannel} ${newsWebhook ? '✅' : '❌ webhook failed'}\n`;
   if (lfgChannel) confirmation += `🎮 LFG: ${lfgChannel} ${lfgWebhook ? '✅' : '❌ webhook failed'}\n`;
-  if (discussionChannel) confirmation += `💬 Discussion: ${discussionChannel} ${discussionWebhook ? '✅' : '❌ webhook failed'}\n`;
-  if (newsRole) confirmation += `\n📢 @news role: ${newsRole}`;
-  if (lfgRole) confirmation += `\n🎮 @lfg role: ${lfgRole}`;
+  
+  confirmation += `\n**Roles:**\n`;
+  if (newsRole) confirmation += `📢 News pings: ${newsRole} ✅\n`;
+  if (lfgRole) confirmation += `🎮 LFG pings: ${lfgRole} ✅\n`;
+  
+  if (permsStatus) confirmation += `\n**Permissions:**\n${permsStatus}`;
   
   await interaction.editReply({ content: confirmation });
-  console.log(`[Admin] ${interaction.user.username} set up bridge for ${interaction.guild.name}`);
+  console.log(`[Admin] ${interaction.user.username} set up bridge for ${interaction.guild.name}` +
+    (createdItems.length > 0 ? ` (created ${createdItems.length} items)` : ''));
 }
 
 // --- /pdh-status ---
