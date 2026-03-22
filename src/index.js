@@ -121,15 +121,19 @@ client.on(Events.MessageCreate, async (message) => {
     return;
   }
   
-  // --- LFG: Owner can post messages (for explanations, announcements) ---
-  // Regular users can't type here (channel permissions block them).
-  // The bot owner CAN post (useful for pinned explanations, announcements).
-  // These owner messages get relayed so they appear on all servers.
+  // --- LFG: Relay all messages with moderation ---
+  // LFG channels now function as both a matchmaking space (via /lfg)
+  // AND a chat space where players can coordinate, schedule, and
+  // discuss games. Messages are relayed across all servers just
+  // like the discussion channel, with profanity filtering applied.
   if (channelType === 'lfg') {
-    if (message.author.id === env.ownerId) {
-      // Relay owner's LFG channel message to all other servers
-      await relayMessage(bridgeConfig, message, 'lfg');
-    }
+    const result = await moderateMessage(
+      message, channelType, bridgeConfig.settings.filterLinks
+    );
+    if (!result.allowed) return;
+    await relayMessage(bridgeConfig, message, 'lfg', {
+      contentOverride: result.cleanedContent,
+    });
     return;
   }
   
