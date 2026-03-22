@@ -57,7 +57,7 @@ const GAME_TYPE_COLOR = {
 // Must be a direct link to an image file (PNG, JPG, GIF).
 // =============================================================
 const GAME_TYPE_THUMBNAIL = {
-  league: 'https://raw.githubusercontent.com/cpdhleague/Guide-book/master/assets/WL_logo.png',
+  league: 'https://raw.githubusercontent.com/TryhardClay/PDH-LFG-Bot/main/PDHBot.jpg',
   casual: 'https://raw.githubusercontent.com/TryhardClay/PDH-LFG-Bot/main/PDHBot.jpg',
 };
 
@@ -368,8 +368,8 @@ async function sendConvokeDMs(client, post, players, postId) {
   let gameUrl = await createConvokeRoom(
     convokeToken,
     postId,
-    firstMsg.guild_id || 'unknown',
-    firstMsg.channel_id || 'unknown',
+    firstMsg.guildId || 'unknown',
+    firstMsg.channelId || 'unknown',
     apiPlayers
   );
 
@@ -462,14 +462,21 @@ function buildLfgEmbed(post, user) {
     }
   }
   
+  // Dynamic title showing how many more players are needed (SpellBot pattern)
+  const playerCount = players ? players.length : 1;
+  const remaining = post.max_players - playerCount;
+  const plural = remaining !== 1 ? 's' : '';
+  const title = remaining > 0
+    ? `${emoji} ${display} — Waiting for ${remaining} more player${plural}...`
+    : `${emoji} ${display} — Game Ready!`;
+  
   const embed = new EmbedBuilder()
     .setColor(color)
-    .setTitle(`${emoji} ${display} — Looking for Players!`)
+    .setTitle(title)
     .addFields(
       { name: 'Players', value: rosterText },
     )
-    .setFooter({ text: `LFG #${post.id} • Expires` })
-    .setTimestamp(new Date(post.expires_at));
+    .setFooter({ text: `LFG #${post.id} • Game Open` });
   
   // Add notes if present
   if (post.notes && post.notes.trim().length > 0) {
@@ -628,8 +635,7 @@ function buildFullLobbyEmbed(post, players) {
     .addFields(
       { name: 'Players', value: rosterText },
     )
-    .setFooter({ text: `LFG #${post.id} • Game in progress` })
-    .setTimestamp(new Date());
+    .setFooter({ text: `LFG #${post.id} • Match has started` });
   
   if (thumbnail) {
     embed.setThumbnail(thumbnail);

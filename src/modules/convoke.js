@@ -96,7 +96,7 @@ async function createConvokeRoom(token, gameId, guildId, channelId, players) {
       name: `PDH Game #${gameId}`,
       spellbotGameId: String(gameId),
       seatLimit: 4,
-      format: 'commander',           // Convoke's format name for Commander/PDH
+      format: 'pauper-commander',      // PDH = 30 starting life
       discordGuild: String(guildId),
       discordChannel: String(channelId),
       discordPlayers: players.map(p => ({

@@ -236,7 +236,15 @@ function getExpiredLfgPosts() {
 }
 
 function getLfgMessages(lfgPostId) {
-  return db.prepare('SELECT * FROM lfg_messages WHERE lfg_post_id = ?').all(lfgPostId);
+  // IMPORTANT: Use column aliases to return camelCase property names.
+  // SQLite columns are snake_case (guild_id) but our JavaScript code
+  // destructures as camelCase (guildId). Without these aliases, every
+  // destructured value would be undefined and updates/deletes would
+  // silently fail. This was the root cause of the "embeds never update" bug.
+  return db.prepare(`
+    SELECT guild_id AS guildId, channel_id AS channelId, message_id AS messageId
+    FROM lfg_messages WHERE lfg_post_id = ?
+  `).all(lfgPostId);
 }
 
 function markLfgExpired(lfgPostId) {
