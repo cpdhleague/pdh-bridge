@@ -56,6 +56,28 @@ function containsLinks(content) {
 }
 
 /**
+ * Check if a message contains a Discord invite link.
+ *
+ * LEARNING NOTE: Discord invite links come in many forms that all
+ * redirect to the same place. Spam bots love to mix these up to
+ * dodge naive filters. We catch them ALL:
+ *
+ *   discord.gg/xyz              (short form — most common)
+ *   discord.com/invite/xyz      (long form)
+ *   discordapp.com/invite/xyz   (legacy domain)
+ *   dsc.gg/xyz                  (third-party shortener)
+ *   invite.gg/xyz               (third-party shortener)
+ *
+ * We also match with or without protocol (https://) and with or
+ * without www. prefix. Case-insensitive across the board.
+ */
+function containsDiscordInvite(content) {
+  if (!content) return false;
+  const inviteRegex = /(?:https?:\/\/)?(?:www\.)?(?:discord(?:\.com|app\.com|\.gg|\.me)|dsc\.gg|invite\.gg)\/(?:invite\/)?[a-z0-9-]+/i;
+  return inviteRegex.test(content);
+}
+
+/**
  * Strip all mentions from a message to prevent cross-server pinging.
  * This is crucial for the Discussion channel.
  * 
@@ -167,7 +189,25 @@ async function moderateMessage(message, channelType, filterLinksEnabled) {
     return { allowed: false, reason: 'user_suspended', cleanedContent: content };
   }
   
-  // Check 2: Profanity filter
+  // Check 2: Discord invite links
+  // Spam bots use these to drag users to scam servers. We block them
+  // aggressively: delete the source message, no relay, no warning.
+  // No strike is issued because this is often automated bot spam, not
+  // a real user making a mistake — we just want it gone.
+  if (content && containsDiscordInvite(content)) {
+    console.log(`[Moderation] Discord invite link blocked from ${username} in ${message.guild.name}: ${content.substring(0, 100)}`);
+    
+    // Delete the source message so it doesn't appear anywhere
+    try {
+      await message.delete();
+    } catch (err) {
+      console.log(`[Moderation] Couldn't delete invite spam in ${message.guild.name} — missing Manage Messages permission?`);
+    }
+    
+    return { allowed: false, reason: 'discord_invite', cleanedContent: content };
+  }
+  
+  // Check 3: Profanity filter
   if (content && content.length > 0) {
     const { isProfane } = checkProfanity(content);
     
@@ -196,18 +236,18 @@ async function moderateMessage(message, channelType, filterLinksEnabled) {
     }
   }
   
-  // Check 3: Link filter (if enabled)
+  // Check 4: Link filter (if enabled)
   let cleanedContent = content;
   if (filterLinksEnabled && containsLinks(content)) {
     cleanedContent = stripLinks(content);
   }
   
-  // Check 4: Strip mentions (always on for Discussion)
+  // Check 5: Strip mentions (always on for Discussion)
   if (channelType === 'discussion') {
     cleanedContent = stripMentions(cleanedContent);
   }
   
-  // Check 5: Strip external emojis (always on)
+  // Check 6: Strip external emojis (always on)
   cleanedContent = stripExternalEmojis(cleanedContent, message.guild.emojis.cache);
   
   return { allowed: true, reason: null, cleanedContent };
@@ -216,6 +256,7 @@ async function moderateMessage(message, channelType, filterLinksEnabled) {
 module.exports = {
   moderateMessage,
   checkProfanity,
+  containsDiscordInvite,
   stripMentions,
   stripLinks,
   stripExternalEmojis,
