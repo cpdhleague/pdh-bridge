@@ -13,6 +13,7 @@
 
 const Filter = require('bad-words');
 const db = require('../database');
+const { env } = require('../config');
 
 // Initialize the profanity filter with default English word list
 // You can customize this by adding/removing words
@@ -78,25 +79,43 @@ function containsDiscordInvite(content) {
 }
 
 /**
- * Strip all mentions from a message to prevent cross-server pinging.
- * This is crucial for the Discussion channel.
- * 
- * LEARNING NOTE: Regular expressions (regex) are patterns for matching
- * text. They look cryptic at first, but they're incredibly powerful.
- * 
- * /@everyone/g   - matches the literal text "@everyone" globally (all occurrences)
- * /<@&\d+>/g     - matches role mentions like <@&123456789>
- * /<@!?\d+>/g    - matches user mentions like <@123456789> or <@!123456789>
- * 
- * The \u200b is a "zero-width space" - an invisible character that
- * breaks the mention syntax so Discord doesn't actually ping anyone.
+ * Strip all mentions from a message, replacing them with readable
+ * names instead of [role] or [user]. This way cross-server users
+ * can still see WHO was mentioned even though the ping won't work.
+ *
+ * LEARNING NOTE: Discord mentions are stored as special syntax:
+ *   <@&123456789>  = role mention (the & means role)
+ *   <@123456789>   = user mention
+ *   <@!123456789>  = user mention with nickname
+ *
+ * We look up the ID in the guild's cache to get the actual name,
+ * then display it as plain text with an @ prefix so it's obvious
+ * it was a mention, just not a clickable one.
  */
-function stripMentions(content) {
-  return content
+function stripMentions(content, guild) {
+  let result = content
     .replace(/@everyone/g, '@\u200beveryone')
-    .replace(/@here/g, '@\u200bhere')
-    .replace(/<@&\d+>/g, '[role]')    // Role mentions
-    .replace(/<@!?\d+>/g, '[user]');  // User mentions
+    .replace(/@here/g, '@\u200bhere');
+  
+  // Replace role mentions with readable names
+  result = result.replace(/<@&(\d+)>/g, (match, roleId) => {
+    if (guild) {
+      const role = guild.roles.cache.get(roleId);
+      if (role) return `@${role.name}`;
+    }
+    return '@unknown-role';
+  });
+  
+  // Replace user mentions with readable names
+  result = result.replace(/<@!?(\d+)>/g, (match, userId) => {
+    if (guild) {
+      const member = guild.members.cache.get(userId);
+      if (member) return `@${member.displayName}`;
+    }
+    return '@someone';
+  });
+  
+  return result;
 }
 
 /**
@@ -225,6 +244,38 @@ async function moderateMessage(message, channelType, filterLinksEnabled) {
         console.log(`[Moderation] Couldn't DM user ${username} - DMs may be disabled`);
       }
       
+      // =========================================================
+      // ADMIN NOTIFICATION
+      // =========================================================
+      // DM the bot owner with full details so they can review
+      // whether the flag was justified. Includes the original
+      // message, the cleaned version, and instructions for
+      // how to reverse the penalty or whitelist a word.
+      // =========================================================
+      try {
+        const ownerUser = await message.client.users.fetch(env.ownerId);
+        if (ownerUser) {
+          let adminMsg = `🚨 **Moderation Flag**\n\n`;
+          adminMsg += `**User:** ${username} (\`${userId}\`)\n`;
+          adminMsg += `**Server:** ${message.guild.name}\n`;
+          adminMsg += `**Channel:** #${message.channel.name} (${channelType})\n`;
+          adminMsg += `**Strike #:** ${result.strikeCount}\n`;
+          adminMsg += `**Action:** ${result.actionTaken}\n\n`;
+          adminMsg += `**Original message:**\n> ${content.substring(0, 1500)}\n\n`;
+          adminMsg += `**Cleaned version:**\n> ${filter.clean(content).substring(0, 500)}\n\n`;
+          adminMsg += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+          adminMsg += `**To reverse this penalty:**\n`;
+          adminMsg += `Use \`/pdh-strikes\` and then \`/pdh-unban\` in Discord.\n\n`;
+          adminMsg += `**To whitelist a flagged word:**\n`;
+          adminMsg += `Add it to the \`filter.removeWords()\` call in \`src/modules/moderation.js\` line ~25.\n`;
+          adminMsg += `Example: \`filter.removeWords('damn', 'hell');\``;
+          
+          await ownerUser.send(adminMsg);
+        }
+      } catch (err) {
+        console.log(`[Moderation] Couldn't DM owner about flag: ${err.message}`);
+      }
+      
       // Delete the original message
       try {
         await message.delete();
@@ -242,9 +293,10 @@ async function moderateMessage(message, channelType, filterLinksEnabled) {
     cleanedContent = stripLinks(content);
   }
   
-  // Check 5: Strip mentions (always on for Discussion)
-  if (channelType === 'discussion') {
-    cleanedContent = stripMentions(cleanedContent);
+  // Check 5: Strip mentions (always on for relayed channels)
+  // Pass the guild so role/user names can be resolved to readable text
+  if (channelType === 'discussion' || channelType === 'lfg') {
+    cleanedContent = stripMentions(cleanedContent, message.guild);
   }
   
   // Check 6: Strip external emojis (always on)

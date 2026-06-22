@@ -147,6 +147,28 @@ function removeBan(userId) {
   db.prepare('UPDATE user_strikes SET permanent_ban = 0, suspended_until = NULL WHERE user_id = ?').run(userId);
 }
 
+/**
+ * Get all users who have any strikes or suspensions.
+ * Used for the amnesty feature to know who to notify.
+ */
+function getAllStrikedUsers() {
+  return db.prepare(
+    'SELECT user_id, username, strike_count, suspended_until, permanent_ban FROM user_strikes WHERE strike_count > 0 OR suspended_until IS NOT NULL OR permanent_ban = 1'
+  ).all();
+}
+
+/**
+ * Clear all strikes and suspensions for all users.
+ * Permanent bans are NOT cleared — those are intentional.
+ * Returns the number of users affected.
+ */
+function clearAllStrikes() {
+  const result = db.prepare(
+    'UPDATE user_strikes SET strike_count = 0, suspended_until = NULL WHERE permanent_ban = 0'
+  ).run();
+  return result.changes;
+}
+
 function getStrikeHistory(userId) {
   return db.prepare('SELECT * FROM strike_history WHERE user_id = ? ORDER BY created_at DESC').all(userId);
 }
@@ -277,6 +299,7 @@ function countSeenArticles() {
 
 module.exports = {
   initDatabase, getUser, addStrike, isUserSuspended, permanentBan, removeBan, getStrikeHistory,
+  getAllStrikedUsers, clearAllStrikes,
   createLfgPost, addLfgPlayer, removeLfgPlayer, getLfgPlayers,
   addLfgMessage, getExpiredLfgPosts, getLfgMessages, markLfgExpired, getLfgPost,
   hasSeenArticle, markArticleSeen, countSeenArticles,

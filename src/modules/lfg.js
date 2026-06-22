@@ -36,7 +36,7 @@ const { env } = require('../config');
 // These map internal values to what users see in embeds
 // =============================================================
 const GAME_TYPE_DISPLAY = {
-  league: 'PDH — League',
+  league: "Wanderer's PDH League — Ranked Game",
   casual: 'PDH Games',
 };
 
@@ -57,7 +57,7 @@ const GAME_TYPE_COLOR = {
 // Must be a direct link to an image file (PNG, JPG, GIF).
 // =============================================================
 const GAME_TYPE_THUMBNAIL = {
-  league: 'https://github.com/cpdhleague/pdh-league/blob/bc82313d51d67ca463bec76fa5d50a1ab5c8c98d/public/favicon.png',
+  league: 'https://raw.githubusercontent.com/TryhardClay/PDH-LFG-Bot/main/PDHBot.jpg',
   casual: 'https://raw.githubusercontent.com/TryhardClay/PDH-LFG-Bot/main/PDHBot.jpg',
 };
 

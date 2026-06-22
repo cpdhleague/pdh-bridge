@@ -95,22 +95,85 @@ client.once(Events.ClientReady, async (readyClient) => {
     }
   }, 60 * 1000); // Check every 60 seconds
   
+  // =============================================================
+  // ONE-TIME AMNESTY — Clear all penalties 8 hours after boot
+  // =============================================================
+  // This was requested to give everyone a clean slate after
+  // false positives from the profanity filter. Each affected
+  // user gets a DM letting them know. This timer only runs once
+  // and can be removed from the code after it fires.
+  // =============================================================
+  setTimeout(async () => {
+    console.log('[Bot] Running one-time amnesty — clearing all strikes...');
+    const db = require('./database');
+    const affected = db.getAllStrikedUsers();
+    const cleared = db.clearAllStrikes();
+    console.log(`[Bot] Amnesty: Cleared strikes for ${cleared} users`);
+    
+    // DM each affected user
+    for (const user of affected) {
+      if (user.permanent_ban) continue; // Don't notify perma-banned users
+      try {
+        const discordUser = await readyClient.users.fetch(user.user_id);
+        await discordUser.send(
+          `**PDH Bridge Notice**\n\n` +
+          `Good news! 🎉 All moderation penalties on the PDH Bridge have been reset. ` +
+          `Your strike history has been cleared and any suspensions have been lifted.\n\n` +
+          `We've improved our filter to reduce false flags. Thank you for being part ` +
+          `of the PDH community! ❤️`
+        );
+      } catch (err) {
+        console.log(`[Bot] Amnesty: Couldn't DM ${user.username}: ${err.message}`);
+      }
+    }
+    console.log('[Bot] Amnesty complete.');
+  }, 8 * 60 * 60 * 1000); // 8 hours in milliseconds
+  console.log('[Bot] One-time amnesty scheduled for 8 hours from now');
+  
   console.log('[Bot] All systems ready!');
 });
 
 // =============================================================
-// Message handler (Discussion + News relay)
+// Message handler (Discussion + LFG + News relay)
 // =============================================================
 
+// =============================================================
+// WHITELISTED BOTS
+// =============================================================
+// Bots in this list are allowed to have their messages relayed
+// across the bridge. All other bots are ignored to prevent loops.
+//
+// To find a bot's user ID: enable Developer Mode in Discord,
+// right-click the bot's name, and click "Copy User ID".
+//
+// WHY THIS IS LOOP-SAFE: When a bot message is relayed, it
+// arrives on other servers as a WEBHOOK message. Line 143 below
+// always blocks webhook messages, so the relayed copy is never
+// re-relayed. Bot → relay → webhook → blocked. No loop.
+// =============================================================
+const WHITELISTED_BOTS = new Set([
+  '268547439714238465',  // Scryfall Bot
+]);
+
 client.on(Events.MessageCreate, async (message) => {
-  // Ignore bots and webhooks to prevent infinite relay loops
-  if (message.author.bot) return;
+  // Ignore webhooks to prevent infinite relay loops
   if (message.webhookId) return;
+  
+  // Ignore bots UNLESS they're on the whitelist
+  if (message.author.bot && !WHITELISTED_BOTS.has(message.author.id)) return;
+  
+  // Ignore our own bot's messages (even if somehow whitelisted)
+  if (message.author.id === client.user.id) return;
   
   const channelInfo = identifyChannel(bridgeConfig, message.guild?.id, message.channel?.id);
   if (!channelInfo) return;
   
   const { channelType } = channelInfo;
+  
+  // Whitelisted bots (like Scryfall) bypass moderation entirely.
+  // Their messages are relayed as-is — no profanity check, no
+  // mention stripping, no link filtering. Bot output is trusted.
+  const isWhitelistedBot = message.author.bot && WHITELISTED_BOTS.has(message.author.id);
   
   // --- NEWS: Never relay human messages ---
   // News channels are RSS-only. The news module (news.js) handles
@@ -127,25 +190,35 @@ client.on(Events.MessageCreate, async (message) => {
   // discuss games. Messages are relayed across all servers just
   // like the discussion channel, with profanity filtering applied.
   if (channelType === 'lfg') {
-    const result = await moderateMessage(
-      message, channelType, bridgeConfig.settings.filterLinks
-    );
-    if (!result.allowed) return;
-    await relayMessage(bridgeConfig, message, 'lfg', {
-      contentOverride: result.cleanedContent,
-    });
+    if (isWhitelistedBot) {
+      // Whitelisted bot: relay directly, no moderation
+      await relayMessage(bridgeConfig, message, 'lfg');
+    } else {
+      const result = await moderateMessage(
+        message, channelType, bridgeConfig.settings.filterLinks
+      );
+      if (!result.allowed) return;
+      await relayMessage(bridgeConfig, message, 'lfg', {
+        contentOverride: result.cleanedContent,
+      });
+    }
     return;
   }
   
   // --- DISCUSSION: Relay with moderation ---
   if (channelType === 'discussion') {
-    const result = await moderateMessage(
-      message, channelType, bridgeConfig.settings.filterLinks
-    );
-    if (!result.allowed) return;
-    await relayMessage(bridgeConfig, message, 'discussion', {
-      contentOverride: result.cleanedContent,
-    });
+    if (isWhitelistedBot) {
+      // Whitelisted bot: relay directly, no moderation
+      await relayMessage(bridgeConfig, message, 'discussion');
+    } else {
+      const result = await moderateMessage(
+        message, channelType, bridgeConfig.settings.filterLinks
+      );
+      if (!result.allowed) return;
+      await relayMessage(bridgeConfig, message, 'discussion', {
+        contentOverride: result.cleanedContent,
+      });
+    }
   }
 });
 

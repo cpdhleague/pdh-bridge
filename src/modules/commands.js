@@ -8,8 +8,8 @@ const { env } = require('../config');
 
 // --- /pdh-ban ---
 async function handleBan(interaction) {
-  if (!isAuthorized(interaction)) {
-    await interaction.reply({ content: 'You don\'t have permission to use this command.', ephemeral: true });
+  if (!isOwner(interaction)) {
+    await interaction.reply({ content: 'Only the bot owner can ban users from the bridge.', ephemeral: true });
     return;
   }
   const targetUser = interaction.options.getUser('user');
@@ -26,8 +26,8 @@ async function handleBan(interaction) {
 
 // --- /pdh-unban ---
 async function handleUnban(interaction) {
-  if (!isAuthorized(interaction)) {
-    await interaction.reply({ content: 'You don\'t have permission to use this command.', ephemeral: true });
+  if (!isOwner(interaction)) {
+    await interaction.reply({ content: 'Only the bot owner can unban users from the bridge.', ephemeral: true });
     return;
   }
   const targetUser = interaction.options.getUser('user');
@@ -412,8 +412,8 @@ async function handleStatus(interaction, config) {
 // Posts the pinned explanation message in a channel.
 // Supports pinning to LFG, News, or Discussion channels.
 async function handlePin(interaction, config) {
-  if (!isOwner(interaction)) {
-    await interaction.reply({ content: 'Only the bot owner can use this command.', ephemeral: true });
+  if (!isAuthorized(interaction)) {
+    await interaction.reply({ content: 'You need to be a server administrator to use this command.', ephemeral: true });
     return;
   }
   
@@ -457,6 +457,16 @@ async function handlePin(interaction, config) {
 
 // =============================================================
 // HELPERS
+// =============================================================
+
+// =============================================================
+// AUTHORIZATION
+// =============================================================
+// Two levels:
+// - isOwner: Only the bot owner (OWNER_ID). Required for
+//   ban and unban — these affect the entire network.
+// - isAuthorized: Owner OR server admin. Used for setup,
+//   config, status, pin — things server admins need access to.
 // =============================================================
 
 function isAuthorized(interaction) {
