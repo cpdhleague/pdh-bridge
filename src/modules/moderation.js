@@ -25,6 +25,8 @@ const filter = new Filter();
 // Remove words you consider acceptable (if any)
 // filter.removeWords('damn', 'hell');
 
+filter.removeWords('hell','god');
+
 /**
  * Check if a message contains profanity.
  * Returns { isProfane: boolean, cleaned: string }
