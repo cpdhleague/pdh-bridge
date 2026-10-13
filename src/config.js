@@ -24,6 +24,22 @@ const DEFAULT_CONFIG = {
   
   // Global settings
   settings: {
+    // Automated profanity filter + strike system. OFF unless you opt in.
+    //
+    // To turn it back on: add MODERATE_PROFANITY=true to .env and
+    // restart the bot. Anything other than the exact string "true"
+    // (including the variable being absent) leaves it off.
+    //
+    // Deliberately NOT stored in bridge-config.json: the bot rewrites
+    // that file on every boot (verifyWebhooks saves webhook URLs back
+    // to it), so a key added there by hand fights with git on deploy.
+    // Keeping the switch in .env means code and config deploy cleanly.
+    //
+    // When off, messages are never blocked, deleted, or struck for
+    // language — no strikes, no DMs, no owner alerts. Still active
+    // regardless: Discord-invite spam blocking, mention stripping,
+    // external-emoji stripping, and manual /pdh-ban + /pdh-unban.
+    moderateProfanity: process.env.MODERATE_PROFANITY === 'true',
     filterLinks: process.env.FILTER_LINKS === 'true',
     lfgExpiryMinutes: parseInt(process.env.LFG_EXPIRY_MINUTES) || 60,
     rssPollInterval: parseInt(process.env.RSS_POLL_INTERVAL) || 10,

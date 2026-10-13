@@ -195,7 +195,8 @@ client.on(Events.MessageCreate, async (message) => {
       await relayMessage(bridgeConfig, message, 'lfg');
     } else {
       const result = await moderateMessage(
-        message, channelType, bridgeConfig.settings.filterLinks
+        message, channelType, bridgeConfig.settings.filterLinks,
+        bridgeConfig.settings.moderateProfanity
       );
       if (!result.allowed) return;
       await relayMessage(bridgeConfig, message, 'lfg', {
@@ -212,7 +213,8 @@ client.on(Events.MessageCreate, async (message) => {
       await relayMessage(bridgeConfig, message, 'discussion');
     } else {
       const result = await moderateMessage(
-        message, channelType, bridgeConfig.settings.filterLinks
+        message, channelType, bridgeConfig.settings.filterLinks,
+        bridgeConfig.settings.moderateProfanity
       );
       if (!result.allowed) return;
       await relayMessage(bridgeConfig, message, 'discussion', {

@@ -197,7 +197,7 @@ function getSuspensionText(strikeCount) {
  * This is the main function called by the message handler.
  * Think of it as the bouncer at the door of the bridge.
  */
-async function moderateMessage(message, channelType, filterLinksEnabled) {
+async function moderateMessage(message, channelType, filterLinksEnabled, profanityEnabled = false) {
   const content = message.content;
   const userId = message.author.id;
   const username = message.author.displayName || message.author.username;
@@ -229,7 +229,11 @@ async function moderateMessage(message, channelType, filterLinksEnabled) {
   }
   
   // Check 3: Profanity filter
-  if (content && content.length > 0) {
+  // Gated on bridgeConfig.settings.moderateProfanity (MODERATE_PROFANITY
+  // in .env). When off, nothing below runs: no strikes, no DMs, no
+  // message deletion, no owner notification. Language passes through
+  // untouched. Checks 4-6 (links, mentions, emojis) still apply.
+  if (profanityEnabled && content && content.length > 0) {
     const { isProfane } = checkProfanity(content);
     
     if (isProfane) {
